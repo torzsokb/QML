@@ -1,0 +1,3 @@
+decide how literal we want to be with the implementation of the constrints
+decide on structure and how much we want to fuck around with classes
+figure out the last formulation and if we want to solve it via callbacks or not
