@@ -12,9 +12,9 @@ import networkx as nx
 import sys
 
 def manhattan_dist(loc1, loc2):
-        dx = abs(loc1[0] - loc2[0])
-        dy = abs(loc1[1] - loc2[1])
-        return dx + dy
+    dx = abs(loc1[0] - loc2[0])
+    dy = abs(loc1[1] - loc2[1])
+    return dx + dy
 
 def plot_solution(selected, coordinates, title=None, starting_node=None):
     plt.figure(figsize=(8, 8))
@@ -146,7 +146,7 @@ if __name__ == "__main__":
     solver = tsp_solver_1(coordinates=coords)
 
     
-    solver.solve_tsp(tight=False, starting_node=29, plot=True)
+    solver.solve_tsp(tight=True, starting_node=29, plot=True)
     
 
     # for i in range(3):
