@@ -1,3 +1,6 @@
+from collections import defaultdict
+import logging
+import math
 import pandas as pd
 import gurobipy as gp
 import gurobipy_pandas as gppd
@@ -117,7 +120,7 @@ class tsp_solver_1:
             model.update()
             title += f"and heuristic warm start from {starting_node}, with initial obj val: {length}, "
         else:
-            title +="and no warm start, "
+            title += "and no warm start, "
 
         model.update()
         model.optimize()
@@ -130,7 +133,143 @@ class tsp_solver_1:
 
         model.dispose()
         
-         
+def shortest_subtour(edges):
+    
+    node_neighbors = defaultdict(list)
+    for i, j in edges:
+        node_neighbors[i].append(j)
+    assert all(len(neighbors) == 2 for neighbors in node_neighbors.values())
+
+    unvisited = set(node_neighbors)
+    shortest = None
+    while unvisited:
+        cycle = []
+        neighbors = list(unvisited)
+        while neighbors:
+            current = neighbors.pop()
+            cycle.append(current)
+            unvisited.remove(current)
+            neighbors = [j for j in node_neighbors[current] if j in unvisited]
+        if shortest is None or len(cycle) < len(shortest):
+            shortest = cycle
+
+    assert shortest is not None
+    return shortest
+
+def all_subtours(edges):
+
+    node_neighbors = defaultdict(list)
+    for i, j in edges:
+        node_neighbors[i].append(j)
+    assert all(len(neighbors) == 2 for neighbors in node_neighbors.values())
+
+    unvisited = set(node_neighbors)
+    subtours = []
+    while unvisited:
+        cycle = []
+        neighbors = list(unvisited)
+        while neighbors:
+            current = neighbors.pop()
+            cycle.append(current)
+            unvisited.remove(current)
+            neighbors = [j for j in node_neighbors[current] if j in unvisited]
+        subtours.append(cycle)
+
+    return subtours
+
+class TSPCallback_2:
+    
+    def __init__(self, nodes, x):
+        self.nodes = nodes
+        self.x = x
+
+    def __call__(self, model, where):
+        
+        if where == GRB.Callback.MIPSOL:
+            try:
+                self.eliminate_subtours(model)
+            except Exception:
+                logging.exception("Exception occurred in MIPSOL callback")
+                model.terminate()
+
+    def eliminate_subtours(self, model):
+        
+        values = model.cbGetSolution(self.x)
+        edges = [(i, j) for (i, j), v in values.items() if v > 0.5]
+        tour = shortest_subtour(edges)
+        if len(tour) < len(self.nodes):
+            model.cbLazy(
+                gp.quicksum(self.x[i, j] for i, j in combinations(tour, 2))
+                <= len(tour) - 1)         
+
+class TSPCallback_1:
+    
+    def __init__(self, nodes, x):
+        self.nodes = nodes
+        self.x = x
+
+    def __call__(self, model, where):
+        
+        if where == GRB.Callback.MIPSOL:
+            try:
+                self.eliminate_subtours(model)
+            except Exception:
+                logging.exception("Exception occurred in MIPSOL callback")
+                model.terminate()
+
+    def eliminate_subtours(self, model):
+        
+        values = model.cbGetSolution(self.x)
+        edges = [(i, j) for (i, j), v in values.items() if v > 0.5]
+        subtours = all_subtours(edges)
+        
+        for subtour in subtours:
+            if 2 <= len(subtour) and len(subtour) <= len(self.nodes) / 2:
+                outside = [i for i in self.nodes if i not in subtour]
+                model.cbLazy(
+                    gp.quicksum(self.x[i, j] for i, j in product(subtour, outside))
+                    >= 2)
+
+        
+def solve_tsp_edge(locations, edge_distance, original=True, callback_allowed=True):
+
+
+    with gp.Env() as env, gp.Model(env=env) as m:
+        
+        # Create variables, and add symmetric keys to the resulting dictionary
+        # 'x', such that (i, j) and (j, i) refer to the same variable.
+        x = m.addVars(edge_distance.keys(), obj=edge_distance, vtype=GRB.BINARY, name="x")
+        x.update({(j, i): v for (i, j), v in x.items()})
+
+        # Create degree 2 constraints
+
+        flow_cons = m.addConstrs(x.sum(i, '*') == 2 for i in locations)
+        # for i in locations:
+        #     m.addConstr(gp.quicksum(x[i, j] for j in locations if i != j) == 2)
+
+        # Try to solve via adding all subtour elimination constraints in advance (expected to fail)
+        if callback_allowed:
+            m.Params.LazyConstraints = 1
+            if original:
+                cb = TSPCallback_1(locations, x)
+            else:
+                cb = TSPCallback_2(locations, x)
+            m.optimize(cb)    
+        else:
+            try:
+                for subtour_size in range(2,  math.floor(len(locations) / 2 + 1)):
+                    for subtour in combinations(locations, subtour_size):
+                        outside = [i for i in locations if i not in subtour]
+                        m.addConstr(
+                            gp.quicksum(x[i, j] for i, j in product(subtour, outside))
+                            >= 2)
+                m.optimize()
+            except Exception:
+                logging.exception("ERROR during from model implementing all constraint")
+
+
+        
+        
 
 
 if __name__ == "__main__":
@@ -139,27 +278,16 @@ if __name__ == "__main__":
     data = pd.read_csv("assignment_files/assignment_2/Residential_areas_2.csv", header=None, names=["x", "y"])
     
     coords = {}
+    locations =[]
     for index, row in data.iterrows():
         coords[index] = (row["x"], row["y"])
+        locations.append(index)
+
+    edge_distance = {(i, j): manhattan_dist(coords[i], coords[j]) for i,j in combinations(locations, 2)}
+
+    solve_tsp_edge(locations, edge_distance, original=True)
 
     
-    solver = tsp_solver_1(coordinates=coords)
-
-    
-    solver.solve_tsp(tight=True, starting_node=29, plot=True)
-    
-
-    # for i in range(3):
-    #     l, tour, tour_tuples = solver.nearest_neighbor(i)
-    #     print(l)
-    #     print(tour)
-    #     index = tour.index(0)
-    #     print(index)
-    #     for _ in range(len(coords.keys()) - index):
-    #         tour.insert(0, tour.pop())
-    #     print(tour)
-    #     title = f"Nearest Neighbor Heuristic, starting point: {i}, objective: {l}"
-    #     plot_solution(coordinates=coords, selected=tour_tuples, starting_node=i, title=title)
 
     
 
