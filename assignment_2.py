@@ -11,8 +11,8 @@ import scipy.sparse as sp
 import matplotlib.pyplot as plt
 from matplotlib.patches import Polygon
 from matplotlib.patches import FancyArrowPatch
-import networkx as nx
 import sys
+import os
 
 
 def manhattan_dist(loc1, loc2):
@@ -169,6 +169,7 @@ class tsp_callback:
         
         for subtour in subtours:
             if 2 <= len(subtour) and len(subtour) <= len(self.nodes) / 2:
+                # very literal implementation of constraint 1c
                 outside = [i for i in self.nodes if i not in subtour]
                 model.cbLazy(
                     gp.quicksum(self.x[i, j] for i, j in product(subtour, outside))
@@ -228,6 +229,7 @@ def solve_tsp_arc(locations, arc_lengths, n, tight=False, starting_node=None, fu
 
     with gp.Env() as env, gp.Model(env=env) as m:
 
+        
         # Set time limit as specified in the assignment
         m.Params.TimeLimit = time_limit
         m.Params.LogToConsole = 0
@@ -265,11 +267,13 @@ def solve_tsp_arc(locations, arc_lengths, n, tight=False, starting_node=None, fu
 
         # Implementing range restrictions
         if fuel_locations is not None and max_range is not None:
-            r = m.addVars(locations, vtype=GRB.CONTINUOUS, lb=0, ub=max_range, name='r')
-            m.addConstrs(r[j] <= r[i] - arc_lengths[i,j] * z[i,j] + max_range * (1 - z[i, j]) for i,j in z.keys() if i not in fuel_locations)
-            m.addConstrs(r[j] <= max_range - arc_lengths[i,j] * z[i,j] + max_range * (1 - z[i, j]) for i,j in z.keys() if i in fuel_locations)
+            r = m.addVars(locations, vtype=GRB.CONTINUOUS, lb=0.0, ub=max_range, name='r')
+            print(r.keys())
+            m.addConstrs(r[j] <= r[i] - arc_lengths[(i,j)] * z[i,j] + max_range * (1 - z[i, j]) for i,j in z.keys() if i not in r.keys())
+            m.addConstrs(r[j] <= max_range - arc_lengths[(i,j)] * z[i,j] + max_range * (1 - z[i, j]) for i,j in z.keys() if i in r.keys())
             m.update()
-
+        
+        # Implementing constraints to ensure alternative solutions
         if forbidden_solution is not None:
             m.addConstr(gp.quicksum(z[i,j] for i,j in forbidden_solution) <= n-1)
             m.addConstr(gp.quicksum(z[j,i] for i,j in forbidden_solution) <= n-1)
@@ -298,6 +302,13 @@ def main():
 
     n, locations, fuel_locations, coordinates, arc_lengths, edge_lengths = load_data(path_locations, path_fuel)
 
+
+    # Bonus Exercise
+    max_range = 100
+    runtime_b, objective_b, selected_b = solve_tsp_arc(locations=locations, arc_lengths=arc_lengths, n=n, fuel_locations=fuel_locations, tight=True, max_range=max_range)
+    print(f"tsp arc formulation with strict constraints and fuel locations \nobjective value: {objective_b} \nrunning time: {runtime_b}")
+    plot_solution(selected=selected_b, coordinates=coordinates, title=f"TSP Solution Arc Formulation with Fuel Locations \nobjective value: {objective_b}", fuel_locations=fuel_locations)
+    
     # Exercise 1 is done in the LateX document
 
     # Exercise 2
@@ -340,7 +351,7 @@ def main():
         print(f"heuristic warm start from {start}, runtime: {runtime}")
 
     # Exercise 8
-    runtime_8a, objective_8a, selected_8a = solve_tsp_arc(locations, arc_lengths, n, forbidden_solution=selected_2a)
+    runtime_8a, objective_8a, selected_8a = solve_tsp_arc(locations, arc_lengths, n, forbidden_solution=selected_2a, tight=True)
     print(f"tsp arc formulation with strict constraints alternative solution \nobjective value: {objective_8a} \nrunning time: {runtime_8a}")
     plot_solution(selected=selected_8a, coordinates=coordinates, title="TSP Arc Formulation Alternative Solution", prev_selected=selected_2a)
 
@@ -351,10 +362,7 @@ def main():
 
     # Exercise 9 done in the LateX document
 
-    # Bonus Exercise
-    runtime_b, objective_b, selected_b = solve_tsp_arc(locations, arc_lengths, n, fuel_locations=fuel_locations, tight=True)
-    print(f"tsp arc formulation with strict constraints and fuel locations \nobjective value: {objective_b} \nrunning time: {runtime_b}")
-    plot_solution(selected=selected_b, coordinates=coordinates, title=f"TSP Solution Arc Formulation with Fuel Locations \nobjective value: {objective_b}", fuel_locations=fuel_locations)
+    
 
 
 
